@@ -1,10 +1,10 @@
 # chalkline — Artifact Bundle Specification
 
-**Version:** `chalkline-bundle-2026-08-28-draft1`
+**Version:** `chalkline-bundle-2026-11-20-draft2`
 **Status:** Draft. **Normative.**
-**Layer:** Application layer over Cyberspace Protocol v2 (`CYBERSPACE_V2.md`, spec version string `2026-03-16-h34-corrected`). This document proposes **no** changes to the base protocol.
+**Layer:** Application layer over Cyberspace Protocol v2 (`CYBERSPACE_V2.md`), chain rules revision `2026-10-08-residue-openings` (V2 §8.12) at `arkin0x/cyberspace@4cb8f1b`. The string `2026-03-16-h34-corrected` is the GPS mapping version (V2 §9.5), which chalkline does not use. This document proposes **no** changes to the base protocol.
 **Design intent:** `../DESIGN.md` (non-normative). Where this document and `DESIGN.md` disagree, this document governs implementations and `DESIGN.md` governs revisions to this document.
-**Protocol ground truth:** `../NOTES/protocol-facts.md`, compiled against `arkin0x/cyberspace@919494a` and `arkin0x/cyberspace-cli@2dff988`. Every base-protocol citation below (`§n.n` with no document named means `CYBERSPACE_V2.md`) is transcribed there with file and line references.
+**Protocol ground truth:** `../NOTES/protocol-facts.md`, re-pinned to `arkin0x/cyberspace@4cb8f1b` and `arkin0x/cyberspace-cli@4e5dab7`. Every base-protocol citation below (`§n.n` with no document named means `CYBERSPACE_V2.md`) is transcribed there with file and line references.
 
 ---
 
@@ -32,7 +32,7 @@ Explicitly **out of scope** for v1, documented in `DESIGN.md` but not specified 
 ## 2. Terminology
 
 - **coord256** — a 256-bit Cyberspace coordinate: three 85-bit unsigned axes X, Y, Z interleaved Morton-style plus a 1-bit plane selector at bit 0 (§2.1, §2.2). Bit `3i+1` is Z bit `i`, `3i+2` is Y bit `i`, `3i+3` is X bit `i`.
-- **movement event** — a `kind 3333` event. Base actions: `spawn`, `hop`, `sidestep` (§8.8). DECK-0001 adds `enter-hyperspace`, `hyperjump`.
+- **movement event**: a `kind 3333` event on the creator's chain. Base actions: `spawn`, `hop`, `sidestep`, `enter-virtual`, `exit-virtual` (§8.8). DECK-0001, which is mandatory (§8.9), adds `enter-hyperspace`, `hyperjump`. Actions inside a virtual bracket (§8.11) and actions a verifier does not recognize (skipped, §8.9) are also movement events but never anchor or count.
 - **serially-seeded event** — a movement event whose temporal work seed derives from `previous_event_id` and whose work therefore cannot begin until the preceding event exists: `hop` (§5.3), `sidestep` (§6.7), `enter-hyperspace` (DECK-0001 §3.2).
 - **anchor** — the movement event to which a placement is bound.
 - **placement** — a single `KIND_PLACEMENT` event: one coordinate plus one payload, bound to one anchor.
@@ -62,7 +62,7 @@ KIND_COMPLETION            = <unassigned — see §9.1>
 
 Any change to a preimage format defined in this document MUST bump the corresponding domain string, following the base spec's own rule for `TERRAIN_DOMAIN_V2` (§5.2). Domain strings are ASCII bytes with no terminator and no length prefix.
 
-`KIND_PLACEMENT` and `KIND_COMPLETION` MUST NOT be `3333`, `33330`, or `321` — the complete set of kinds claimed by the base spec and DECK-0001 as of `919494a` (`decks/README.md:41` confirms DECK-0001 is the sole registry entry). They MUST be registered in chalkline's own DECK before publication to a shared relay set.
+`KIND_PLACEMENT` and `KIND_COMPLETION` MUST NOT be any kind claimed or reserved upstream as of `4cb8f1b` (`decks/README.md:57-77`; `NOTES/protocol-facts.md` §2.1): base `3333`, `33330`, `33335`, `11333`, reserved `33332`; DECK `321`, `33331`, `3330`, `3340`, `3341`, `33340`, `23330`, `23333`, `1111`, `1063`, `3350`, `3351`, `3352`; and SHOULD NOT be a kind taken in practice by other applications (`3334`, `33334`, `3338`, `3302`-`3313`; DECK-0008 `:96`). They MUST be registered in chalkline's own DECK before publication to a shared relay set. See §9.1.
 
 ---
 
@@ -73,7 +73,7 @@ Any change to a preimage format defined in this document MUST bump the correspon
 A bundle is a set of Nostr events. It MUST consist of, and MUST NOT contain anything other than:
 
 1. exactly one **spawn event** (`kind 3333`, `A=spawn`);
-2. one or more **movement events** (`kind 3333`, `A ∈ {hop, sidestep, enter-hyperspace, hyperjump}`) forming a contiguous chain rooted at the spawn event;
+2. one or more **movement events** (`kind 3333`) forming a contiguous chain rooted at the spawn event. Their actions are whatever V2 allows on a chain: the recognized actions of the base protocol and of every mandatory DECK (V2 §8.8, §8.9), actions the verifier does not recognize, which are skipped per V2 §8.9, and virtual brackets with the actions inside them (V2 §8.11);
 3. one or more **placement events** (`KIND_PLACEMENT`);
 4. exactly one **completion event** (`KIND_COMPLETION`).
 
@@ -88,9 +88,9 @@ Let `E_spawn` be the spawn event and `E_term` the anchor of the highest-indexed 
 - Each movement event other than the spawn MUST carry `["e","<spawn_event_id>","","genesis"]` and `["e","<previous_event_id>","","previous"]` (§8.4, §8.5).
 - Each `previous_event_id` MUST resolve to another event in the bundle, and each movement event other than `E_term` MUST be referenced as `previous` by exactly one other movement event in the bundle.
 - The bundle MUST NOT contain movement events after `E_term`.
-- No two movement events in the bundle may share a `previous_event_id`. Two events sharing one are a fork; a verifier MUST reject such a bundle. (This rule is stated explicitly only in DECK-0001 §8; the base spec's §12.1 is marked non-normative and says only that forking is detectable. See §9.9.)
+- No two movement events in the bundle may share a `previous_event_id`. Two events sharing one are a fork, and under V2 §8.7.3 rule 4 a forked chain is dead from the spawn; a verifier MUST reject such a bundle. Chain validity in general is decided by V2 §8.7.3 under the chain rules revision named in the header (§9.9).
 
-`hyperjump` events MAY appear within the span. They are travel, not drawing (`DESIGN.md` §6: *hyperjump to reach a region, hops to draw in it*). They MUST be verified for chain validity like any other event in the span, and they MUST NOT contribute to `chain_depth` (§7.10).
+`hyperjump` events MAY appear within the span. They are travel, not drawing (`DESIGN.md` §6: *hyperjump to reach a region, hops to draw in it*). They MUST be verified for chain validity like any other event in the span, and they MUST NOT contribute to `chain_depth` (§7 Step 12). The same holds for `enter-virtual`, `exit-virtual`, every action inside a virtual bracket, and every skipped action: they are verified as V2 says and never count toward `chain_depth`.
 
 ### 4.3 Placement event
 
@@ -109,7 +109,7 @@ Let `E_spawn` be the spawn event and `E_term` the anchor of the highest-indexed 
 | 9 | `Z` | `<sz>` | |
 | 10 | `S` | `"<sx>-<sy>-<sz>"` | |
 
-`content` MUST be the empty string `""`. Placement data goes in tags because `content` is not reliably free across kinds — the reference CLI already writes the proof hash into `content` on sidestep events (`nostr_event.py:202`), and §8.5 neither requires nor forbids it (`DESIGN.md` §4.1).
+`content` MUST be the empty string `""`. Placement data goes in tags because `content` is not reliably free across kinds: the reference CLI writes the proof hash into `content` on sidestep events (`nostr_event.py:331`), and §8.5 neither requires nor forbids it (`DESIGN.md` §4.1).
 
 A placement event MUST carry no tags beyond those above. A verifier MUST reject a placement with an unrecognised tag name; this preserves bit-identical reproducibility (§8.3) by forbidding producer-private tag extensions from silently altering the event id.
 
@@ -156,7 +156,7 @@ Producers SHOULD keep payloads small. Relays impose event size limits that this 
 
 Every event in the bundle MUST carry a valid Schnorr `sig` over its `id`, per §8.2.
 
-§8.2 notes that some prototypes leave `sig` blank for local-only chains, and the reference CLI always does so (`nostr_event.py:47-71`, `"sig": ""`; recorded as its one known conformance gap at `docs/spec-conformance/CYBERSPACE_V2_2026-03-16-h34.md:97-98`). **chalkline grants no such exemption.** A bundle containing an event with an empty or invalid `sig` MUST be reported invalid. A bundle assembled directly from `cyberspace-cli` output will fail this check until the events are signed.
+V2 now agrees: `sig` MUST be valid, and an event whose `id` or `sig` fails is not authentic and is discarded before a chain is resolved (V2 §8.2, `:1765`; §8.7.3, `:1903`). The reference CLI still builds every event with `"sig": ""` (`nostr_event.py:73`; its conformance checklist records the gap at `docs/spec-conformance/CYBERSPACE_V2_2026-03-16-h34.md:4`, `:98`). A bundle containing an event with an empty or invalid `sig` MUST be reported invalid. A bundle assembled directly from `cyberspace-cli` output will fail this check until the events are signed.
 
 ---
 
@@ -166,7 +166,7 @@ Every event in the bundle MUST carry a valid Schnorr `sig` over its `id`, per §
 
 Two integer encodings coexist in the base protocol and **which one applies is per-step**. Producers and verifiers MUST NOT substitute one for the other.
 
-**(a) `int_to_bytes_be_min`** — normative at §5.5 (`CYBERSPACE_V2.md:503-515`):
+**(a) `int_to_bytes_be_min`**, normative at §5.5 (`CYBERSPACE_V2.md:590-602`):
 
 ```python
 def int_to_bytes_be_min(n: int) -> bytes:
@@ -181,7 +181,7 @@ The `n == 0` branch returns the single byte `0x00`, **not** the empty string. Th
 
 **(b) Fixed-width 32-byte big-endian** — used for coordinates inside the terrain preimage only (§5.2 step 1.3; `coord.to_bytes(32, "big")` at `terrain.py:76`).
 
-`region_bytes = int_to_bytes_be_min(region_n)` (§7.2, `CYBERSPACE_V2.md:833-845`). This is the exact byte value the region identifier is computed from, and chalkline's stat derivation (§6) takes it verbatim.
+`region_bytes = int_to_bytes_be_min(region_n)` (§7.2, `CYBERSPACE_V2.md:1316-1330`). This is the exact byte value the region identifier is computed from, and chalkline's stat derivation (§6) takes it verbatim.
 
 ### 5.2 Text encodings
 
@@ -270,16 +270,16 @@ Steps 1–4 are exactly §7.4's per-height discovery derivation and reuse the ba
 
 > **A producer or verifier MUST NOT use `sha256(region_bytes)` as a stat seed, stat value, or any published chalkline value.**
 
-`sha256(region_bytes)` **is** `location_decryption_key` for that region (§7.2, `CYBERSPACE_V2.md:833-845`). Publishing it, or any value from which it is recoverable, would hand out the decryption key for every `kind 33330` location-encrypted content event in that region. The base spec's security argument — that seeing `lookup_id` does not permit deriving `location_decryption_key` without the region preimage (§7.2, `:841`) — depends on that key not being republished by another application layer. Step 5's domain prefix is what keeps chalkline outside that construction.
+`sha256(region_bytes)` **is** `location_decryption_key` for that region (§7.2, `CYBERSPACE_V2.md:1316-1330`). Publishing it, or any value from which it is recoverable, would hand out the decryption key for every `kind 33330` location-encrypted content event in that region. The base spec's security argument, that seeing `lookup_id` does not permit deriving `location_decryption_key` without the region preimage (§7.2, `:1324`), depends on that key not being republished by another application layer. Step 5's domain prefix is what keeps chalkline outside that construction.
 
 Equally, `sha256(sha256(region_bytes))` is `lookup_id` and MUST NOT be used as a stat value.
 
 ### 6.5 Properties a verifier may rely on
 
 - **Determinism without communication.** Two parties compute identical stats from the coordinate alone (§7.2's stable-region property), with no chain, no relay, and no interaction.
-- **Not temporally bound.** The temporal axis of §5 is intentionally excluded from region identifiers; they do not change when someone moves through (§7.2 Note, `:843`). Stats are stable for the life of the coordinate space.
+- **Not temporally bound.** The temporal axis of §5 is intentionally excluded from region identifiers; they do not change when someone moves through (§7.2 Note, `:1326`). Stats are stable for the life of the coordinate space.
 - **Regional, not per-placement.** Every placement inside the same aligned subtree at height `h` has the **same** stats. Regions have fixed geology; some yield better material than others.
-- **Plane-blind.** `region_n` combines `rx, ry, rz` only. The plane bit is not an input at any step of §6.3. Two placements at identical `(x, y, z)` in opposite planes therefore derive **identical** stats. Contrast the base terrain function `K`, which *does* include the plane bit in its preimage (§5.2 step 1.3). This asymmetry is a property of the base spec, not a chalkline choice; whether chalkline should compensate is §9.2.
+- **Plane-blind.** `region_n` combines `rx, ry, rz` only. The plane bit is not an input at any step of §6.3. Two placements at identical `(x, y, z)` in opposite planes therefore derive **identical** stats. Contrast the base terrain function `K`, which *does* include the plane bit in its preimage (§5.2 step 1.3). This asymmetry is a property of the base spec, not a chalkline choice: V2 now states that a region and its twin in the other plane share one `region_n` and one key (§2.4, `:241`; §7.2, `:1330`). Whether chalkline should compensate is §9.2.
 
 ### 6.6 Output shape
 
@@ -312,18 +312,19 @@ For every event, verify the Schnorr `sig` over the recomputed `id` against `pubk
 Reject unless the spawn event has `["A","spawn"]` and its `C` tag equals its own `pubkey` (§3.2, §8.3). Reject unless its sector tags match the §10 derivation from `C`.
 
 **Step 7 — Chain reconstruction.**
-Walk from the spawn event forward by `previous` linkage. Reject if any movement event's `previous` id is absent from the bundle; if any movement event's `genesis` id is not the spawn id; if two movement events share a `previous` id (fork, §4.2); if the walk does not visit every movement event in the bundle exactly once (orphans or cycles); or if any movement event's `c` tag does not equal its predecessor's `C` tag. Reject if the chain does not terminate at the anchor of the highest-indexed placement (§4.2).
+Resolve the bundle's movement events per V2 §8.7.3 (authentic events only, chain events only, rules 1 to 5), treating the bundle as the complete set of events held. Reject if any movement event's `previous` id is absent from the bundle; if any movement event's `genesis` id is not the spawn id; if two movement events share a `previous` id (fork, V2 §8.7.3 rule 4; §4.2); if the walk does not visit every movement event in the bundle exactly once (orphans or cycles); or if the chain does not terminate at the anchor of the highest-indexed placement (§4.2). Continuity is V2's, not a plain predecessor check: each recognized action's `c` MUST equal the `C` of the nearest recognized action before it, skipped actions are seen through, and a virtual bracket is checked as a unit (V2 §8.9, `:1984-1998`; §8.11.4, §8.11.5).
 
-**Step 8 — Movement proof verification.**
-For every `hop` and `sidestep` in the span, verify the proof against the base protocol:
+**Step 8. Chain validity under the base protocol.**
+The span from the spawn to `E_term` MUST be valid under the chain rules of revision `2026-10-08-residue-openings` (V2 §8.12), which this document references normatively and does not restate. In particular:
 
-- 8a. Compute base terrain `K` at the event's destination `C`, **including the plane bit**: for each `bits` in `[3, 7, 9, 11]` in order, `digest = sha256(TERRAIN_DOMAIN_V2 ‖ byte(bits) ‖ cell_coord.to_bytes(32,"big"))` where `cell_coord = xyz_to_coord((x2>>bits)<<bits, (y2>>bits)<<bits, (z2>>bits)<<bits, plane)`; `nibble_i = digest[0] & 0x0F`; `word16 = (n0<<12)|(n1<<8)|(n2<<4)|n3`; `K = popcount(word16)`, which MUST lie in `[0,16]` (§5.2).
-- 8b. Compute the temporal seed: `t = int(previous_event_id_bytes) mod 2^85`; `t_base = (t >> K) << K`; `cantor_t = compute_subtree_cantor(t_base, K)` (§5.3; identical for sidesteps per §6.7).
-- 8c. For a `hop`: compute per-axis roots at `h = find_lca_height(v1, v2)` and `region_n = π(π(cantor_x, cantor_y), cantor_z)` (§4.6, §4.7); then `hop_n = π(region_n, cantor_t)`; `proof_hash = sha256(sha256(int_to_bytes_be_min(hop_n)))` (§5.4, §5.6). Reject unless it equals the `proof` tag.
-- 8d. For a `sidestep`: verify the three axis Merkle roots in `mr` and the inclusion paths in `mp` against `hx`/`hy`/`hz` (§6.3–§6.5, §6.10); compute `region_m = π(π(mx, my), mz)` from the roots as big-endian integers (§6.6); then `sidestep_n = π(region_m, cantor_t)` and `proof_hash = sha256(sha256(int_to_bytes_be_min(sidestep_n)))` (§6.8). Reject unless it equals the `proof` tag. All three axes use Merkle roots; there is no mixed mode (§6.6).
-- 8e. Plane changes are valid mid-chain; a verifier MUST support hops where `plane1 != plane2` (§8.7.1 step 2) and MUST NOT reject on that basis.
-- 8f. For every event in the span, reject unless its sector tags match the §10 derivation from its `C` tag.
-- 8g. `enter-hyperspace` and `hyperjump` events in the span MUST be verified per DECK-0001 §3.2 and §5.3–§5.5 respectively **if** the verifier implements DECK-0001. A verifier that does not implement DECK-0001 MUST reject a bundle whose span contains such an event, and MUST NOT skip them silently. Note that `cyberspace-cli` is not a reference implementation for DECK-0001 v3 and MUST NOT be treated as authoritative for hyperspace behaviour (`NOTES/protocol-facts.md` §9).
+- 8a. Every `hop` MUST verify per V2 §8.7.1 (residue openings, §5.9 to §5.11), and every `sidestep` per V2 §8.7.2 (sampled openings with the re-roll price, §6.10, §6.11). Plane changes are valid mid-chain (V2 §8.7.1 step 2) and MUST NOT be rejected on that basis.
+- 8b. Grandfathered events are accepted exactly as V2 says and no further: hops listed in `grandfathered-v1-hops.txt` (V2 §5.13) and sidesteps listed in `grandfathered-v2-sidesteps.txt` (V2 §6.16), both as pinned at `arkin0x/cyberspace@4cb8f1b`, and rides listed in `decks/grandfathered-v1-hyperjumps.txt` (DECK-0001 §5.8) at the same commit. A verifier MUST state the commit of the lists it embeds.
+- 8c. Every tag the chain rules read MUST appear exactly once with a well-formed value, and each event MUST carry exactly one `A` tag (V2 §8.8). Sector tags MUST match the §10 derivation from `C`.
+- 8d. `enter-hyperspace` and `hyperjump` events MUST be verified per DECK-0001, which is mandatory (V2 §8.9, `:1982`). Rides need Bitcoin mainnet block data (DECK-0001 §1.4); a verifier that cannot obtain it MUST report the bundle as unverifiable rather than valid. `cyberspace-cli` verifies rides but is not named a DECK-0001 reference implementation (`NOTES/protocol-facts.md` §9).
+- 8e. Actions a verifier does not recognize are skipped per V2 §8.9, and virtual brackets are verified per V2 §8.11.5. Neither is a reason to reject.
+- 8f. **Conformance check.** A verifier MUST reach every verdict in `chain-rules-2026-10-08-residue-openings.json` at `4cb8f1b` (V2 §8.12, `:2166`, `:2198-2204`), using that file's test list of v1 hops and synthetic block line only while running the vectors. A verifier that does not pass them MUST NOT claim conformance to this document.
+
+chalkline adds only the checks in Steps 9 to 12 on top of this. If any event in the span is invalid under V2, the bundle is invalid, even where V2 would merely freeze the chain at an earlier position: a bundle claims the whole span up to `E_term`.
 
 **Step 9 — Placement validation.**
 For the placement set:
@@ -345,7 +346,7 @@ For each placement, derive `region_n` and `stat_seed` per §6.3 at the declared 
 **Step 12 — Depth accounting.**
 Compute:
 
-- `chain_depth` = the number of **serially-seeded** movement events in the span: `hop` + `sidestep` + `enter-hyperspace`. `hyperjump` events MUST NOT be counted, because a ride's per-block work shares one `previous_event_id` and computes in parallel (DECK-0001 §5.3; `DESIGN.md` §2). See §9.7.
+- `chain_depth` = the number of **serially-seeded** movement events in the span: `hop` + `sidestep` + `enter-hyperspace`, counting only recognized actions outside virtual brackets. `hyperjump` events MUST NOT be counted, because a ride's per-block work shares one `previous_event_id` and computes in parallel (DECK-0001 §5.3; `DESIGN.md` §2). `enter-virtual`, `exit-virtual`, actions inside a virtual bracket (V2 §8.11.2: no base proof, no base work) and skipped actions (V2 §8.9) MUST NOT be counted. See §9.7.
 - `placement_count` = `N`.
 - `hyperjump_count` = the number of `hyperjump` events in the span, reported separately and never folded into `chain_depth`.
 
@@ -360,7 +361,7 @@ A valid bundle is a narrow claim. This section is normative in one respect: **an
 
 ### 8.1 It does not prove elapsed wall-clock time
 
-Verification proves *serial dependency* — that hop `N`'s temporal seed derives from hop `N−1`'s event id, so the work could not have been precomputed or amortized (§5.1, `:445`). It does not measure seconds. Per-hop cost varies with terrain `K` (binomial on `[0,16]`, so worst case is ~4,000× the best case in tree size) and with single-threaded hardware. Nostr `created_at` values are self-asserted and prove neither duration nor honesty. A bundle's cost is a lower bound expressed in *sequential computations by one key*, not in time. Converting that to a duration requires assumptions this document does not supply.
+Verification proves *serial dependency*: that hop `N`'s temporal seed derives from hop `N−1`'s event id, so the work could not have been precomputed or amortized (§5.1, `:532`). It does not measure seconds, and it does not bound per-step latency: hops parallelize within a step, sidesteps are plain SHA-256, and paid proof services are allowed (`DESIGN.md` §2). Per-hop cost varies with terrain `K` (binomial on `[0,16]`, so worst case is ~4,000× the best case in tree size) and with single-threaded hardware. Nostr `created_at` values are self-asserted and prove neither duration nor honesty. A bundle's cost is a lower bound expressed in *sequential computations by one key*, not in time. Converting that to a duration requires assumptions this document does not supply.
 
 ### 8.2 It does not prove travel or distance
 
@@ -372,11 +373,11 @@ A published bundle is verifiable, therefore readable, therefore reproducible. An
 
 ### 8.4 It does not prove the absence of a fork
 
-Step 7 detects forks *within the supplied events*. It cannot detect a conflicting event the verifier was not given. Establishing non-equivocation requires relay coverage that no verifier can guarantee and that this document deliberately does not require (§4.1). A bundle that verifies today may sit beside a conflicting event that surfaces tomorrow. Note also that the explicit fork-invalidation rule this document adopts appears only in DECK-0001 §8; the base spec's §12.1 is non-normative on the point (§9.9).
+Step 7 detects forks *within the supplied events*. It cannot detect a conflicting event the verifier was not given. Establishing non-equivocation requires relay coverage that no verifier can guarantee and that this document deliberately does not require (§4.1). A bundle that verifies today may sit beside a conflicting event that surfaces tomorrow. If such an event exists, V2 §8.7.3 rule 4 makes the creator's chain dead from the spawn, and every placement anchored to it with it (§9.9, §9.13).
 
 ### 8.5 It does not prove the chain is still live
 
-Publishing a new `spawn` event at any time invalidates all prior movement events in the old chain, because it carries a newer timestamp; the keypair returns to its spawn coordinate and the old history remains on relays but is no longer the active chain (§3.2, §12.3). A verified bundle is a statement about a chain segment as it existed, not about the creator's current state. See §9.10.
+Publishing a new `spawn` event at any time ends the old chain: the newest spawn starts the active chain, and the old history remains on relays but is no longer part of it (§3.2, §8.7.3 rule 2, §12.3). A chain can also end by an invalid event (frozen) or a fork (dead from the spawn) (§3.2). A verified bundle is a statement about a chain segment as it existed, not about the creator's current state. See §9.10.
 
 ### 8.6 It does not prove one person, or a scarce person
 
@@ -412,7 +413,7 @@ Verification runs over a supplied event set. It does not prove any event reached
 
 These are points where `DESIGN.md` is ambiguous or silent. They are recorded rather than resolved. Each MUST be settled before this document leaves draft status; §9.1, §9.2, and §9.3 block interoperability outright, because two implementations choosing differently will disagree on validity or on stats.
 
-**9.1 Event kind numbers.** `DESIGN.md` §8 requires chalkline to "pick from a range clear of" `3333`, `33330`, and `321`, and to register the choice in chalkline's DECK. It does not name the numbers, nor state whether placements should follow DECK-0001's precedent of reusing an existing kind with a distinguishing tag versus minting new kinds. `DESIGN.md` argues for new kinds — placements are content bound to movement, not movement itself — but the specific values are unassigned. Nostr replaceable/addressable ranges also constrain the choice, and `DESIGN.md` does not say which behaviour is wanted.
+**9.1 Event kind numbers.** `DESIGN.md` §8 requires chalkline to pick a range clear of every upstream kind and to register the choice in chalkline's DECK. The avoid list has grown (§3): base `3333`, `33330`, `33335`, `11333`, reserved `33332`; DECK `321`, `33331`, `3330`, `3340`, `3341`, `33340`, `23330`, `23333`, `1111`, `1063`, `3350`-`3352`; the ephemeral range `20000`-`29999` used by DECK-0002; and `3334`, `33334`, `3338`, `3302`-`3313` taken in practice by other applications. The `3330`-`3352` range is crowded. Still unassigned. `DESIGN.md` §9 also proposes, undecided, expressing placements as DECK-0004 items or DECK-0003 objects, which would need no new kinds. It does not name the numbers, nor state whether placements should follow DECK-0001's precedent of reusing an existing kind with a distinguishing tag versus minting new kinds. `DESIGN.md` argues for new kinds, since placements are content bound to movement, not movement itself, but the specific values are unassigned. Nostr replaceable/addressable ranges also constrain the choice, and `DESIGN.md` does not say which behaviour is wanted.
 
 **9.2 Plane scoping.** `DESIGN.md` §4.2 states that *"`BUNDLE.md` MUST state whether artifacts are plane-scoped, and whether a bundle's placements may span planes"* — and then does not say which. This document therefore does **not** state it, and the question is open. Three sub-questions:
   (a) May a bundle's placements span both planes? Plane changes are valid mid-chain (§8.7.1), so the base protocol permits it.
@@ -431,13 +432,15 @@ These are points where `DESIGN.md` is ambiguous or silent. They are recorded rat
 
 **9.8 Payload codec registry.** §4.6 fixes the tag shape and leaves the codec set unassigned. `DESIGN.md` describes placements as "a coordinate plus payload" without characterising the payload. Open: the initial codec set, size limits, and whether codecs are registered in chalkline's DECK alongside kinds.
 
-**9.9 Base-protocol fork rule.** §4.2 adopts DECK-0001 §8's rule — *two movement events with the same `previous_event_id` are a fork; both branches are invalid from that point* — and applies it to bundles. The base spec has no equivalent explicit rule: §12.1 (`:1312`) is under a heading marked non-normative and says only that a linear chain makes forking detectable. Whether the base protocol intends the same invalidation is not stated anywhere in the fetched sources (`NOTES/protocol-facts.md`, UNKNOWN). chalkline is importing an extension's rule into a base-protocol context.
+**9.9 Base-protocol fork rule. RESOLVED.** V2 §8.7.3 rule 4 (`:1914`) is normative: more than one distinct event naming the same event as `e` previous is a fork, and the chain is dead from the spawn, however valid the events before the fork are. DECK-0001 §8 (`:420`) now defers to it, and §12.1 (`:2535`) repeats it. §4.2 and Step 7 follow V2 directly.
 
-**9.10 Respawn and completed bundles.** §8.5 notes a later spawn event invalidates the old chain (§3.2, §12.3). `DESIGN.md` does not say whether a bundle completed before a respawn remains valid, becomes historical-but-verifiable, or is destroyed. The fidelity-bond reasoning in §4.3 — *a forked key's history becomes worthless* — suggests intent, but says nothing about honest respawns.
+**9.10 Respawn and completed bundles. PARTLY RESOLVED.** V2 now says what a respawn does to the old chain: it "ends the old chain", and events naming an older spawn "belong to an older chain; they remain on relays as history and are ignored here" (§3.2, `:306`; §8.7.3 rule 2, `:1912`). A respawn does not make the old chain invalid; it makes it history, and its proofs still verify. Still open, and for `DESIGN.md` to decide: whether a bundle completed before an honest respawn keeps its value, or only its verifiability. Contrast a fork, which kills the chain from the spawn (§9.9, §9.13).
 
-**9.11 Signature requirement versus the reference CLI.** §4.7 requires valid signatures, which means no bundle can be assembled from unmodified `cyberspace-cli` output (`"sig": ""` at `nostr_event.py:47-71`). `DESIGN.md` does not address the tooling gap. Open: whether v1 tests should include unsigned fixtures for the local-chain case §8.2 contemplates.
+**9.11 Signature requirement versus the reference CLI. PARTLY RESOLVED.** The base spec now requires valid signatures and discards unsigned events as inauthentic (V2 §8.2, `:1765`; §8.7.3, `:1903`), so §4.7 is no longer stricter than the base. The tooling gap remains: `cyberspace-cli` still writes `"sig": ""` (`nostr_event.py:73`), so no bundle can be assembled from its unmodified output. Open: how test fixtures get signed. Unsigned fixtures are no longer a meaningful case, since V2 dropped its allowance for blank signatures.
 
-**9.12 Sidestep `content` asymmetry.** The reference CLI sets `content = proof_hash_hex` on sidesteps but `""` on spawn and hop (`nostr_event.py:202`, `:92`, `:160`); §8.5 specifies no `content` requirement either way and the CLI's own conformance checklist does not flag it (`NOTES/protocol-facts.md`, UNKNOWN). Since `content` enters the event id (§5.3), two producers disagreeing here produce different sidestep ids for the same movement — which breaks the bit-identical reproducibility §8.3 depends on. chalkline cannot fix this in its own events; it inherits it. Open: whether `tests/vectors/` should pin one convention for sidesteps in the span.
+**9.12 Sidestep `content` asymmetry.** The reference CLI sets `content = proof_hash_hex` on sidesteps but `""` on spawn and hop (`nostr_event.py:331`, `:95`, `:283`); §8.5 specifies no `content` requirement either way and the CLI's own conformance checklist does not flag it (`NOTES/protocol-facts.md`, UNKNOWN). Since `content` enters the event id (§5.3), two producers disagreeing here produce different sidestep ids for the same movement, which breaks the bit-identical reproducibility §8.3 depends on. chalkline cannot fix this in its own events; it inherits it. Open: whether `tests/vectors/` should pin one convention for sidesteps in the span.
+
+**9.13 Artifact survival when the creator's chain dies.** A creator can fork their own chain at any time with one signature, and V2 §8.7.3 rule 4 then makes the whole chain dead from the spawn, voiding every anchor in it. A bundle verified today can be voided tomorrow by its own creator, including after it has been sold (`DESIGN.md` §4.3). Open: whether a verifier given evidence of a later fork MUST report the bundle invalid, whether an artifact survives as history, and what transfer must do to protect a buyer. This blocks any v1 claim that a valid bundle stays valid.
 
 ---
 
@@ -445,14 +448,15 @@ These are points where `DESIGN.md` is ambiguous or silent. They are recorded rat
 
 `tests/vectors/` MUST contain valid and invalid cases, each invalid case naming the section of this document it violates, matching the `errors[]` identifiers of §7. At minimum, invalid cases SHOULD cover: multi-signer bundle (§4.1); fork in span (§4.2); hyperjump anchor (§4.4); spawn anchor (§4.4); two placements on one anchor (§4.4); placement `C` ≠ anchor `C` (§7 Step 9d); non-contiguous `i` (Step 9a); `i` order disagreeing with chain order (Step 9f); wrong `root` (Step 10); wrong `n` (Step 10); uppercase hex (§5.2); leading-zero integer (§5.2); reordered tags producing an id mismatch (§5.3); empty `sig` (§4.7); non-empty `content` on a placement (§4.3); `h` out of range (§6.2); and the `N = 1` root case (§5.5).
 
-Valid cases SHOULD include: a single-placement bundle; a bundle whose span contains a plane-changing hop (§7 Step 8e); a bundle whose span contains anchoring-free hops (§4.4); and a bundle with two placements in the same aligned subtree at `h`, asserting identical stat seeds (§6.5).
+Valid cases SHOULD include: a single-placement bundle; a bundle whose span contains a plane-changing hop (§7 Step 8a); a bundle whose span contains anchoring-free hops (§4.4); a bundle whose span contains a closed virtual bracket and a skipped action, neither counted in `chain_depth` (§7 Step 12); and a bundle with two placements in the same aligned subtree at `h`, asserting identical stat seeds (§6.5).
 
 ---
 
 ## 11. References
 
-- `CYBERSPACE_V2.md` — Cyberspace Protocol v2, spec version `2026-03-16-h34-corrected`, at `arkin0x/cyberspace@919494a`.
-- `decks/DECK-0001-hyperspace.md` — Hyperspace (Bitcoin block transit), Draft v3, 2026-08-24, same commit.
+- `CYBERSPACE_V2.md`: Cyberspace Protocol v2, chain rules revision `2026-10-08-residue-openings`, at `arkin0x/cyberspace@4cb8f1b`.
+- `chain-rules-2026-10-08-residue-openings.json`, `grandfathered-v1-hops.txt`, `grandfathered-v2-sidesteps.txt`, `decks/grandfathered-v1-hyperjumps.txt`: same commit.
+- `decks/DECK-0001-hyperspace.md`: Hyperspace (Bitcoin block transit), Draft v3, last updated 2026-11-10, mandatory, same commit.
 - `../NOTES/protocol-facts.md` — verified transcription of both, with file and line citations, and an explicit `UNKNOWN` section for what is not established.
 - `../DESIGN.md` — chalkline design intent (non-normative).
 - NIP-01 — Nostr event serialization and id computation.
